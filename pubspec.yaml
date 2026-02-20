@@ -1,0 +1,36 @@
+name: chkobba_tn
+description: Traditional Tunisian Chkobba card game
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  provider: ^6.1.5+1
+
+  # Value Equality
+  equatable: ^2.0.7
+
+  # Local Storage
+  shared_preferences: ^2.5.4
+  audioplayers: ^6.5.1
+
+  # Firebase (for multiplayer - Phase 3)
+  # firebase_core: ^2.24.2
+  # cloud_firestore: ^4.14.0
+  # firebase_auth: ^4.16.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/audio/

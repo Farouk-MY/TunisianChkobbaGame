@@ -1,0 +1,9 @@
+"plain" is not an allowed value for option "--format".
+
+Usage: dart analyze [arguments] [<directory>]
+-h, --help                   Print this usage information.
+    --fatal-infos            Treat info level issues as fatal.
+    --[no-]fatal-warnings    Treat warning level issues as fatal.
+                             (defaults to on)
+
+Run "dart help" to see global options.
