@@ -8,6 +8,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/game_constants.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/services/audio_service.dart';
+import '../../../../core/services/game_history_service.dart';
 import '../providers/game_provider.dart';
 import '../../domain/entities/card.dart' as game_card;
 import '../widgets/game_setup_dialog.dart';
@@ -32,9 +33,20 @@ class _GameBoardPageState extends State<GameBoardPage>
   int _remainingSeconds = GameConstants.turnTimeout;
   Set<game_card.Card> _selectedTableCards = {};
   bool _showingScoreBoard = false;
-  bool _showDealingAnimation = true;
-  int _lastRoundNumber = 0;
+  bool _showDealingAnimation = false;
+  bool _isRedeal = false;
+  int _lastHandCount = 0;
   final AudioService _audioService = AudioService();
+
+  // Chkobba popup state
+  bool _showChkobbaPopup = false;
+  bool _isChkobbaAI = false;
+  Timer? _chkobbaTimer;
+
+  // Prevent duplicate callbacks
+  bool _roundEndScheduled = false;
+  bool _gameEndScheduled = false;
+  bool _redealScheduled = false;
 
   @override
   void initState() {
@@ -43,11 +55,12 @@ class _GameBoardPageState extends State<GameBoardPage>
   }
 
   void _initAudioAndGame() async {
-    await _audioService.initialize();
-    _audioService.startBackgroundMusic();
-    
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeGame();
+    // Initialize game immediately — don't block on audio
+    _initializeGame();
+
+    // Start game music in the background (crossfade + pre-cache)
+    _audioService.initialize().then((_) {
+      _audioService.startGameMusic();
     });
   }
 
@@ -61,12 +74,19 @@ class _GameBoardPageState extends State<GameBoardPage>
       targetScore: config?.targetScore ?? GameConstants.defaultTargetScore,
     );
     
-    // Show dealing animation
-    setState(() => _showDealingAnimation = true);
+    // After game state is created (synchronous), trigger the animation
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && gameProvider.gameState != null) {
+        setState(() => _showDealingAnimation = true);
+      }
+    });
   }
 
   void _onDealingComplete() {
-    setState(() => _showDealingAnimation = false);
+    setState(() {
+      _showDealingAnimation = false;
+      _isRedeal = false;
+    });
     _startTurnTimer();
   }
 
@@ -77,20 +97,21 @@ class _GameBoardPageState extends State<GameBoardPage>
     final gameProvider = context.read<GameProvider>();
     if (gameProvider.gameState?.isHumanTurn == true) {
       _turnTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (mounted) {
-          setState(() {
-            _remainingSeconds--;
-            
-            // Play warning sound at 10 seconds
-            if (_remainingSeconds == 10) {
-              _audioService.playTimerWarning();
-            }
-            
-            if (_remainingSeconds <= 0) {
-              timer.cancel();
-              _autoPlayCard();
-            }
-          });
+        if (!mounted) return;
+        _remainingSeconds--;
+        
+        if (_remainingSeconds == 10) {
+          _audioService.playTimerWarning();
+        }
+        
+        if (_remainingSeconds <= 0) {
+          timer.cancel();
+          _autoPlayCard();
+        }
+        
+        // Only rebuild every 5 seconds to reduce jank
+        if (_remainingSeconds % 5 == 0 || _remainingSeconds <= 10) {
+          setState(() {});
         }
       });
     }
@@ -111,11 +132,13 @@ class _GameBoardPageState extends State<GameBoardPage>
   @override
   void dispose() {
     _turnTimer?.cancel();
-    _audioService.stopBackgroundMusic();
+    _chkobbaTimer?.cancel();
+    // Switch back to lobby music when leaving game
+    _audioService.startLobbyMusic();
     super.dispose();
   }
 
-  @override
+   @override
   Widget build(BuildContext context) {
     return Consumer2<ThemeProvider, GameProvider>(
       builder: (context, themeProvider, gameProvider, child) {
@@ -125,20 +148,43 @@ class _GameBoardPageState extends State<GameBoardPage>
           return _buildLoadingScreen();
         }
 
-        // Check for round end (show score after each round)
-        if (gameState.roundNumber > _lastRoundNumber && !_showingScoreBoard) {
-          _lastRoundNumber = gameState.roundNumber;
-          if (_lastRoundNumber > 1) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Check for round end (guarded to prevent duplicate callbacks)
+        if (gameState.isRoundOver && !_showingScoreBoard && !_roundEndScheduled) {
+          _roundEndScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _roundEndScheduled = false;
+            if (mounted && !_showingScoreBoard) {
               _showRoundEndScore(gameProvider);
-            });
-          }
+            }
+          });
         }
 
-        // Check for game end
-        if (gameState.isGameOver && !_showingScoreBoard) {
+        // Detect mid-round re-deal: hand went from 0 → 3
+        final currentHandCount = gameState.players[0].hand.length;
+        if (_lastHandCount == 0 && currentHandCount == 3 &&
+            !_showDealingAnimation && !_showingScoreBoard &&
+            gameState.isPlaying && !_redealScheduled) {
+          _redealScheduled = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            _showGameEndDialog(gameProvider);
+            _redealScheduled = false;
+            if (mounted && !_showDealingAnimation) {
+              setState(() {
+                _isRedeal = true;
+                _showDealingAnimation = true;
+              });
+            }
+          });
+        }
+        _lastHandCount = currentHandCount;
+
+        // Check for game end
+        if (gameState.isGameOver && !_showingScoreBoard && !_gameEndScheduled) {
+          _gameEndScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _gameEndScheduled = false;
+            if (mounted && !_showingScoreBoard) {
+              _showGameEndDialog(gameProvider);
+            }
           });
         }
 
@@ -190,13 +236,31 @@ class _GameBoardPageState extends State<GameBoardPage>
               ),
               
               // Card dealing animation overlay
-              if (_showDealingAnimation && gameState != null)
-                CardDealingAnimation(
-                  playerCards: gameState.players[0].hand,
-                  aiCards: gameState.players[1].hand,
-                  tableCards: gameState.tableCards,
-                  isRedTheme: true,
-                  onComplete: _onDealingComplete,
+              if (_showDealingAnimation && gameState != null &&
+                  (gameState.players[0].hand.isNotEmpty || gameState.tableCards.isNotEmpty))
+                Positioned.fill(
+                  child: CardDealingAnimation(
+                    playerCards: gameState.players[0].hand,
+                    aiCards: gameState.players[1].hand,
+                    tableCards: gameState.tableCards,
+                    isRedTheme: true,
+                    isRedeal: _isRedeal,
+                    onComplete: _onDealingComplete,
+                  ),
+                ),
+
+              // Chkobba popup overlay
+              if (_showChkobbaPopup)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: _dismissChkobbaPopup,
+                    child: Container(
+                      color: Colors.black54,
+                      child: Center(
+                        child: ChkobbaPopup(isAI: _isChkobbaAI),
+                      ),
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -213,15 +277,36 @@ class _GameBoardPageState extends State<GameBoardPage>
             colors: [Color(0xFF8B1538), Color(0xFF3D0A1A)],
           ),
         ),
-        child: const Center(
+        child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('🎴', style: TextStyle(fontSize: 60)),
-              SizedBox(height: 20),
-              Text(
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(
+                  Icons.style_rounded,
+                  size: 44,
+                  color: Colors.white70,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
                 'Préparation...',
                 style: TextStyle(color: Colors.white70, fontSize: 18),
+              ),
+              const SizedBox(height: 16),
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white38,
+                ),
               ),
             ],
           ),
@@ -630,12 +715,30 @@ class _GameBoardPageState extends State<GameBoardPage>
 
   void _showChkobbaCelebration() {
     _audioService.playChkobba();
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.black54,
-      builder: (context) => const ChkobbaPopup(),
-    );
+    _showChkobbaOverlay(isAI: false);
+  }
+
+  void _showAIChkobbaCelebration() {
+    _audioService.playChkobba();
+    _showChkobbaOverlay(isAI: true);
+  }
+
+  void _showChkobbaOverlay({required bool isAI}) {
+    _chkobbaTimer?.cancel();
+    setState(() {
+      _showChkobbaPopup = true;
+      _isChkobbaAI = isAI;
+    });
+    _chkobbaTimer = Timer(const Duration(milliseconds: 2500), () {
+      _dismissChkobbaPopup();
+    });
+  }
+
+  void _dismissChkobbaPopup() {
+    _chkobbaTimer?.cancel();
+    if (mounted && _showChkobbaPopup) {
+      setState(() => _showChkobbaPopup = false);
+    }
   }
 
   void _handleAITurn(GameProvider gameProvider) {
@@ -643,26 +746,22 @@ class _GameBoardPageState extends State<GameBoardPage>
     
     final gameState = gameProvider.gameState;
     if (gameState != null && gameState.isAITurn && gameState.isPlaying) {
-      Future.delayed(const Duration(milliseconds: 1500), () {
-        if (mounted) {
-          final tableWasNotEmpty = gameProvider.gameState?.tableCards.isNotEmpty ?? false;
-          gameProvider.playAITurn().then((_) {
-            final newState = gameProvider.gameState;
-            if (tableWasNotEmpty && newState?.tableCards.isEmpty == true) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('⭐ IA: Chkobba!'),
-                  duration: Duration(seconds: 2),
-                  backgroundColor: Color(0xFF6B5B95),
-                ),
-              );
-            }
-            
-            if (mounted && gameProvider.gameState?.isHumanTurn == true) {
-              _startTurnTimer();
-            }
-          });
-        }
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (!mounted) return;
+        final tableWasNotEmpty = gameProvider.gameState?.tableCards.isNotEmpty ?? false;
+
+        gameProvider.playAITurn().then((_) {
+          if (!mounted) return;
+          _audioService.playCardPlace();
+
+          final newState = gameProvider.gameState;
+          if (tableWasNotEmpty && newState?.tableCards.isEmpty == true) {
+            _showAIChkobbaCelebration();
+          }
+          if (gameProvider.gameState?.isHumanTurn == true) {
+            _startTurnTimer();
+          }
+        });
       });
     } else if (gameState?.isHumanTurn == true) {
       _startTurnTimer();
@@ -673,6 +772,8 @@ class _GameBoardPageState extends State<GameBoardPage>
     _showingScoreBoard = true;
     _audioService.playRoundEnd();
     final gameState = gameProvider.gameState!;
+    final humanScore = gameState.players[0].score;
+    final aiScore = gameState.players[1].score;
     
     showDialog(
       context: context,
@@ -681,11 +782,12 @@ class _GameBoardPageState extends State<GameBoardPage>
         humanPlayer: gameState.players[0],
         aiPlayer: gameState.players[1],
         isGameEnd: false,
-        isHumanWinner: false,
+        isHumanWinner: humanScore >= aiScore,
         onContinue: () {
           Navigator.pop(context);
           _showingScoreBoard = false;
-          // Show dealing animation for new round
+          // Transition to new round, then show dealing animation
+          gameProvider.startNextRound();
           setState(() => _showDealingAnimation = true);
         },
       ),
@@ -703,7 +805,11 @@ class _GameBoardPageState extends State<GameBoardPage>
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
           ElevatedButton(
-            onPressed: () { Navigator.pop(context); Navigator.pop(context); },
+            onPressed: () {
+              _audioService.startLobbyMusic();
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryRed),
             child: const Text('Quitter', style: TextStyle(color: Colors.white)),
           ),
@@ -715,7 +821,9 @@ class _GameBoardPageState extends State<GameBoardPage>
   void _showGameEndDialog(GameProvider gameProvider) {
     _showingScoreBoard = true;
     final gameState = gameProvider.gameState!;
-    final isHumanWinner = gameState.players[0].score >= gameState.targetScore;
+    final human = gameState.players[0];
+    final ai = gameState.players[1];
+    final isHumanWinner = human.score >= gameState.targetScore;
     
     // Play victory or defeat sound
     if (isHumanWinner) {
@@ -723,23 +831,36 @@ class _GameBoardPageState extends State<GameBoardPage>
     } else {
       _audioService.playDefeat();
     }
+
+    // Save game result to history
+    GameHistoryService.saveGameResult(GameResult(
+      date: DateTime.now(),
+      humanScore: human.score,
+      aiScore: ai.score,
+      isHumanWinner: isHumanWinner,
+      humanChkobbas: human.chkobbas,
+      aiChkobbas: ai.chkobbas,
+      aiDifficulty: gameProvider.aiDifficulty,
+      targetScore: gameState.targetScore,
+      roundsPlayed: gameState.roundNumber,
+    ));
     
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => RoundScoreBoard(
-        humanPlayer: gameState.players[0],
-        aiPlayer: gameState.players[1],
+        humanPlayer: human,
+        aiPlayer: ai,
         isGameEnd: true,
         isHumanWinner: isHumanWinner,
         onPlayAgain: () {
           Navigator.pop(context);
           _showingScoreBoard = false;
-          _lastRoundNumber = 0;
           gameProvider.playAgain();
           setState(() => _showDealingAnimation = true);
         },
         onHome: () {
+          _audioService.startLobbyMusic();
           Navigator.pop(context);
           Navigator.pop(context);
         },

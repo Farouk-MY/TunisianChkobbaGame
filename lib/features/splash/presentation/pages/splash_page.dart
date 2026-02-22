@@ -2,10 +2,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:io';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/app_durations.dart';
 import '../../../../core/theme/theme_provider.dart';
+import '../../../../core/services/audio_service.dart';
 import 'dart:math' as math;
 
 class SplashPage extends StatefulWidget {
@@ -37,6 +39,13 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
     super.initState();
     _initAnimations();
     _startAnimations();
+    _initAudio();
+  }
+
+  void _initAudio() async {
+    final audioService = AudioService();
+    await audioService.initialize();
+    audioService.startLobbyMusic();
   }
 
   void _initAnimations() {
@@ -90,9 +99,22 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
   }
 
   void _navigateToLogin() {
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) {
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      if (!mounted) return;
+      // Check internet connectivity
+      bool hasInternet = false;
+      try {
+        final result = await InternetAddress.lookup('google.com')
+            .timeout(const Duration(seconds: 3));
+        hasInternet = result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+      } catch (_) {
+        hasInternet = false;
+      }
+      if (!mounted) return;
+      if (hasInternet) {
         Navigator.pushReplacementNamed(context, '/login');
+      } else {
+        Navigator.pushReplacementNamed(context, '/home');
       }
     });
   }

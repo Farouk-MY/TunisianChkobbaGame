@@ -7,8 +7,10 @@ import 'core/theme/theme_provider.dart';
 import 'features/splash/presentation/pages/splash_page.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/home/presentation/pages/home_page.dart';
+import 'features/home/presentation/pages/game_history_page.dart';
 import 'features/settings/presentation/pages/settings_page.dart';
 import 'features/game/presentation/pages/rules_page.dart';
+import 'features/tutorial/presentation/pages/tutorial_page.dart';
 import 'features/game/presentation/providers/game_provider.dart';
 import 'features/game/domain/usecases/initialize_game_usecase.dart';
 import 'features/game/domain/usecases/play_card_usecase.dart';
@@ -67,8 +69,10 @@ class ChkobaApp extends StatelessWidget {
               '/': (context) => const SplashPage(),
               '/login': (context) => const LoginPage(),
               '/home': (context) => const ChkobaHomePage(),
+              '/history': (context) => const GameHistoryPage(),
               '/settings': (context) => const SettingsPage(),
               '/rules': (context) => const RulesPage(),
+              '/tutorial': (context) => const TutorialPage(),
             },
           );
         },

@@ -1,224 +1,307 @@
 // lib/core/services/audio_service.dart
 
+import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Audio service for game sounds with real audio and haptic feedback
+/// ═══════════════════════════════════════════════════════════════════════
+///  AUDIO ENGINE — clean, simple, reliable
+/// ═══════════════════════════════════════════════════════════════════════
+///
+/// One music player, one SFX player. SFX has a minimum-interval guard
+/// so rapid-fire calls (e.g. card dealing) don't overlap.
+///
+/// Music lifecycle:
+///   Lobby → background_music2.mp3  |  Game → background_music.mp3
 class AudioService {
+  // ── Singleton ──────────────────────────────────────────────────────
   static final AudioService _instance = AudioService._internal();
   factory AudioService() => _instance;
   AudioService._internal();
 
-  // Separate players for SFX and Music
-  AudioPlayer? _sfxPlayer;
-  AudioPlayer? _musicPlayer;
-  
+  // ── Players ────────────────────────────────────────────────────────
+  final AudioPlayer _musicPlayer = AudioPlayer();
+  final AudioPlayer _sfxPlayer = AudioPlayer();
+
+  // ── State ──────────────────────────────────────────────────────────
   bool _soundEnabled = true;
   bool _musicEnabled = true;
   bool _vibrationEnabled = true;
+  double _musicVolume = 0.55;
+  double _sfxVolume = 0.80;
   bool _initialized = false;
 
+  String? _currentMusicContext;     // 'lobby' | 'game'
+  String? _currentlyPlayingAsset;
+
+  // SFX throttle — prevent overlapping rapid-fire sounds
+  DateTime _lastSfxTime = DateTime(2000);
+  static const int _sfxMinIntervalMs = 180;
+
+  // Prefs keys
+  static const _keySoundEnabled = 'audio_sound_enabled';
+  static const _keyMusicEnabled = 'audio_music_enabled';
+  static const _keyVibrationEnabled = 'audio_vibration_enabled';
+  static const _keyMusicVolume = 'audio_music_volume';
+  static const _keySfxVolume = 'audio_sfx_volume';
+
+  // ── Getters ────────────────────────────────────────────────────────
   bool get soundEnabled => _soundEnabled;
   bool get musicEnabled => _musicEnabled;
   bool get vibrationEnabled => _vibrationEnabled;
-  
-  // Alias getters with 'is' prefix for consistency
   bool get isSoundEnabled => _soundEnabled;
   bool get isMusicEnabled => _musicEnabled;
   bool get isVibrationEnabled => _vibrationEnabled;
+  double get musicVolume => _musicVolume;
+  double get sfxVolume => _sfxVolume;
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  INITIALIZATION
+  // ═════════════════════════════════════════════════════════════════════
 
   Future<void> initialize() async {
     if (_initialized) return;
-    
-    debugPrint('AudioService: Initializing...');
-    
-    // Create new players
-    _sfxPlayer = AudioPlayer();
-    _musicPlayer = AudioPlayer();
-    
-    // Configure players
-    await _sfxPlayer!.setReleaseMode(ReleaseMode.stop);
-    await _musicPlayer!.setReleaseMode(ReleaseMode.loop);
-    await _musicPlayer!.setVolume(0.3);
-    
+    debugPrint('[Audio] Initializing...');
+
+    await _loadSettings();
+
+    // SFX player: no audio focus, no loop
+    await _sfxPlayer.setReleaseMode(ReleaseMode.stop);
+    try {
+      await _sfxPlayer.setAudioContext(AudioContext(
+        android: AudioContextAndroid(
+          isSpeakerphoneOn: false,
+          audioFocus: AndroidAudioFocus.none,
+          usageType: AndroidUsageType.game,
+          contentType: AndroidContentType.sonification,
+        ),
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: {AVAudioSessionOptions.mixWithOthers},
+        ),
+      ));
+    } catch (_) {}
+
+    // Music player: full focus, full quality
+    try {
+      await _musicPlayer.setAudioContext(AudioContext(
+        android: AudioContextAndroid(
+          isSpeakerphoneOn: false,
+          audioFocus: AndroidAudioFocus.gain,
+          usageType: AndroidUsageType.media,
+          contentType: AndroidContentType.music,
+        ),
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: {AVAudioSessionOptions.mixWithOthers},
+        ),
+      ));
+    } catch (_) {}
+
     _initialized = true;
-    debugPrint('AudioService: Initialized successfully');
+    debugPrint('[Audio] Ready ✓');
   }
 
-  void setSoundEnabled(bool value) => _soundEnabled = value;
-  
+  // ── Persistence ────────────────────────────────────────────────────
+
+  Future<void> _loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _soundEnabled = prefs.getBool(_keySoundEnabled) ?? true;
+      _musicEnabled = prefs.getBool(_keyMusicEnabled) ?? true;
+      _vibrationEnabled = prefs.getBool(_keyVibrationEnabled) ?? true;
+      _musicVolume = prefs.getDouble(_keyMusicVolume) ?? 0.55;
+      _sfxVolume = prefs.getDouble(_keySfxVolume) ?? 0.80;
+    } catch (_) {}
+  }
+
+  Future<void> _saveSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_keySoundEnabled, _soundEnabled);
+      await prefs.setBool(_keyMusicEnabled, _musicEnabled);
+      await prefs.setBool(_keyVibrationEnabled, _vibrationEnabled);
+      await prefs.setDouble(_keyMusicVolume, _musicVolume);
+      await prefs.setDouble(_keySfxVolume, _sfxVolume);
+    } catch (_) {}
+  }
+
+  // ── Settings ───────────────────────────────────────────────────────
+
+  void setSoundEnabled(bool value) {
+    _soundEnabled = value;
+    _saveSettings();
+  }
+
   void setMusicEnabled(bool value) {
     _musicEnabled = value;
+    _saveSettings();
     if (!value) {
-      _musicPlayer?.stop();
+      stopMusic();
+    } else {
+      if (_currentMusicContext == 'lobby') startLobbyMusic();
+      if (_currentMusicContext == 'game') startGameMusic();
     }
   }
-  
-  void setVibrationEnabled(bool value) => _vibrationEnabled = value;
 
-  /// Play card deal sound
+  void setVibrationEnabled(bool value) {
+    _vibrationEnabled = value;
+    _saveSettings();
+  }
+
+  void setMusicVolume(double value) {
+    _musicVolume = value.clamp(0.0, 1.0);
+    _musicPlayer.setVolume(_musicVolume);
+    _saveSettings();
+  }
+
+  void setSfxVolume(double value) {
+    _sfxVolume = value.clamp(0.0, 1.0);
+    _saveSettings();
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  MUSIC
+  // ═════════════════════════════════════════════════════════════════════
+
+  Future<void> startLobbyMusic() async {
+    _currentMusicContext = 'lobby';
+    await _playMusic('audio/background_music2.mp3');
+  }
+
+  Future<void> startGameMusic() async {
+    _currentMusicContext = 'game';
+    await _playMusic('audio/background_music.mp3');
+  }
+
+  Future<void> startBackgroundMusic() => startGameMusic();
+
+  Future<void> stopMusic() async {
+    try {
+      await _musicPlayer.stop();
+      _currentlyPlayingAsset = null;
+    } catch (_) {}
+  }
+
+  Future<void> stopBackgroundMusic() => stopMusic();
+  Future<void> pauseBackgroundMusic() => _musicPlayer.pause();
+  Future<void> resumeBackgroundMusic() async {
+    if (!_musicEnabled) return;
+    await _musicPlayer.resume();
+  }
+
+  Future<void> _playMusic(String assetPath) async {
+    if (!_musicEnabled) return;
+    if (_currentlyPlayingAsset == assetPath) return;
+
+    try {
+      await _musicPlayer.stop();
+      _currentlyPlayingAsset = null;
+      await _musicPlayer.setReleaseMode(ReleaseMode.loop);
+      await _musicPlayer.setVolume(_musicVolume);
+      await _musicPlayer.play(AssetSource(assetPath));
+      _currentlyPlayingAsset = assetPath;
+      debugPrint('[Audio] Music → $assetPath ✓');
+    } catch (e) {
+      debugPrint('[Audio] Music error: $e');
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  SOUND EFFECTS
+  // ═════════════════════════════════════════════════════════════════════
+
   Future<void> playCardDeal() async {
-    await _playSound('card_deal');
+    await _playSfx('card_deal');
     await _vibrate(HapticFeedback.lightImpact);
   }
 
-  /// Play card place sound
   Future<void> playCardPlace() async {
-    await _playSound('card_place');
+    await _playSfx('card_place');
     await _vibrate(HapticFeedback.mediumImpact);
   }
 
-  /// Play card capture sound
   Future<void> playCardCapture() async {
-    await _playSound('card_capture');
+    await _playSfx('card_capture');
     await _vibrate(HapticFeedback.heavyImpact);
   }
 
-  /// Play Chkobba celebration sound
+  /// Play the "CHKOBBA!" celebration sound.
+  /// Bypasses throttle — this is a special celebration, must always play.
+  /// TODO (online mode): use male/female voice variant based on player gender.
   Future<void> playChkobba() async {
-    await _playSound('chkobba');
+    if (!_soundEnabled) return;
+    // Reset throttle so this always plays
+    _lastSfxTime = DateTime(2000);
+    await _playSfx('chkkoba');
     await _vibrate(HapticFeedback.heavyImpact);
     await Future.delayed(const Duration(milliseconds: 100));
     await _vibrate(HapticFeedback.heavyImpact);
-    await Future.delayed(const Duration(milliseconds: 100));
-    await _vibrate(HapticFeedback.mediumImpact);
   }
 
-  /// Play round end sound
   Future<void> playRoundEnd() async {
-    await _playSound('round_end');
+    await _playSfx('card_capture');
     await _vibrate(HapticFeedback.mediumImpact);
   }
 
-  /// Play victory sound
   Future<void> playVictory() async {
-    await _playSound('victory');
+    await _playSfx('victory');
     await _vibrate(HapticFeedback.heavyImpact);
-    await Future.delayed(const Duration(milliseconds: 150));
-    await _vibrate(HapticFeedback.mediumImpact);
   }
 
-  /// Play defeat sound
   Future<void> playDefeat() async {
-    await _playSound('defeat');
+    await _playSfx('defeat');
     await _vibrate(HapticFeedback.lightImpact);
   }
 
-  /// Play button tap sound
   Future<void> playButtonTap() async {
-    await _playSound('button_tap');
+    await _playSfx('button_tap');
     await _vibrate(HapticFeedback.selectionClick);
   }
 
-  /// Play timer warning sound
   Future<void> playTimerWarning() async {
-    await _playSound('timer_warning');
+    await _playSfx('button_tap');
     await _vibrate(HapticFeedback.lightImpact);
   }
 
-  /// Start game background music (in game)
-  Future<void> startBackgroundMusic() async {
-    if (!_musicEnabled) {
-      debugPrint('AudioService: Music disabled');
-      return;
-    }
-    
-    try {
-      debugPrint('AudioService: Starting GAME music...');
-      
-      // Ensure initialized
-      if (_musicPlayer == null) {
-        await initialize();
-      }
-      
-      // Stop any current music
-      await _musicPlayer!.stop();
-      
-      // Set source and play
-      await _musicPlayer!.setSource(AssetSource('audio/background_music.mp3'));
-      await _musicPlayer!.setVolume(0.3);
-      await _musicPlayer!.setReleaseMode(ReleaseMode.loop);
-      await _musicPlayer!.resume();
-      
-      debugPrint('AudioService: GAME music started!');
-    } catch (e, stack) {
-      debugPrint('AudioService: GAME music error - $e');
-      debugPrint('Stack: $stack');
-    }
-  }
-
-  /// Start lobby background music (in home/menu)
-  Future<void> startLobbyMusic() async {
-    if (!_musicEnabled) {
-      debugPrint('AudioService: Music disabled');
-      return;
-    }
-    
-    try {
-      debugPrint('AudioService: Starting LOBBY music...');
-      
-      // Ensure initialized
-      if (_musicPlayer == null) {
-        await initialize();
-      }
-      
-      // Stop any current music
-      await _musicPlayer!.stop();
-      
-      // Set source and play
-      await _musicPlayer!.setSource(AssetSource('audio/background_music2.mp3'));
-      await _musicPlayer!.setVolume(0.25);
-      await _musicPlayer!.setReleaseMode(ReleaseMode.loop);
-      await _musicPlayer!.resume();
-      
-      debugPrint('AudioService: LOBBY music started!');
-    } catch (e, stack) {
-      debugPrint('AudioService: LOBBY music error - $e');
-      debugPrint('Stack: $stack');
-    }
-  }
-
-  /// Stop background music
-  Future<void> stopBackgroundMusic() async {
-    await _musicPlayer?.stop();
-  }
-
-  /// Pause background music
-  Future<void> pauseBackgroundMusic() async {
-    await _musicPlayer?.pause();
-  }
-
-  /// Resume background music
-  Future<void> resumeBackgroundMusic() async {
-    if (!_musicEnabled) return;
-    await _musicPlayer?.resume();
-  }
-
-  Future<void> _playSound(String soundName) async {
+  /// Play SFX with throttle guard — if called too rapidly,
+  /// subsequent calls within [_sfxMinIntervalMs] are skipped.
+  /// This prevents overlapping / duplicate sounds during animations.
+  Future<void> _playSfx(String name) async {
     if (!_soundEnabled) return;
-    if (_sfxPlayer == null) return;
-    
+
+    // Throttle: skip if too soon after last SFX
+    final now = DateTime.now();
+    if (now.difference(_lastSfxTime).inMilliseconds < _sfxMinIntervalMs) {
+      return;
+    }
+    _lastSfxTime = now;
+
     try {
-      await _sfxPlayer!.play(AssetSource('audio/$soundName.mp3'));
+      await _sfxPlayer.setVolume(_sfxVolume);
+      await _sfxPlayer.play(AssetSource('audio/$name.mp3'));
     } catch (e) {
-      debugPrint('AudioService: SFX error for $soundName - $e');
+      debugPrint('[Audio] SFX error ($name): $e');
+    }
+
+    // Fallback: resume music if Android stole focus
+    if (_currentlyPlayingAsset != null && _musicEnabled) {
+      Future.delayed(const Duration(milliseconds: 100), () async {
+        try { await _musicPlayer.resume(); } catch (_) {}
+      });
     }
   }
 
   Future<void> _vibrate(Future<void> Function() haptic) async {
-    if (_vibrationEnabled) {
-      try {
-        await haptic();
-      } catch (_) {}
-    }
+    if (!_vibrationEnabled) return;
+    try { await haptic(); } catch (_) {}
   }
 
+  // ── Cleanup ────────────────────────────────────────────────────────
   void dispose() {
-    _sfxPlayer?.dispose();
-    _musicPlayer?.dispose();
-    _sfxPlayer = null;
-    _musicPlayer = null;
-    _initialized = false;
+    _musicPlayer.dispose();
+    _sfxPlayer.dispose();
   }
 }

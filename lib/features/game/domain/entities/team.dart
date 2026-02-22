@@ -106,10 +106,14 @@ class Team extends Equatable {
       id: 'team_human',
       name: 'Équipe $playerName',
       players: [
-        Player.human(name: playerName),
+        Player.human(
+          id: 'player_human',
+          name: playerName,
+        ),
         Player.ai(
+          id: 'player_partner',
           name: partnerName ?? 'Partenaire',
-          difficulty: 'medium',
+          aiDifficulty: 'medium',
         ),
       ],
     );
@@ -124,8 +128,8 @@ class Team extends Equatable {
       id: 'team_ai',
       name: name ?? 'Équipe IA',
       players: [
-        Player.ai(name: 'Adversaire 1', difficulty: difficulty),
-        Player.ai(name: 'Adversaire 2', difficulty: difficulty),
+        Player.ai(id: 'ai_1', name: 'Adversaire 1', aiDifficulty: difficulty),
+        Player.ai(id: 'ai_2', name: 'Adversaire 2', aiDifficulty: difficulty),
       ],
     );
   }

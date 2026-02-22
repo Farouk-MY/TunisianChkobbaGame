@@ -131,9 +131,7 @@ class GameProvider with ChangeNotifier {
       _isProcessing = false;
       notifyListeners();
       
-      // Check for game over
       if (_gameState?.isGameOver == true) {
-        // Game ended - will be handled by UI
         return;
       }
     } catch (e) {
@@ -181,6 +179,17 @@ class GameProvider with ChangeNotifier {
       _isProcessing = false;
       notifyListeners();
     }
+  }
+
+  /// Transition from roundEnd → new round.
+  /// Called by the UI after the round score board is dismissed.
+  void startNextRound() {
+    if (_gameState == null) return;
+    if (!_gameState!.isRoundOver) return;
+
+    _gameState = _gameState!.startNewRound();
+    _gameState = _gameState!.dealInitialCards();
+    notifyListeners();
   }
 
   // Get possible captures for a card

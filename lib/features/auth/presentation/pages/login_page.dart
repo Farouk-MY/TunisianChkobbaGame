@@ -88,12 +88,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   }
 
   void _handleGuestLogin() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text(AppStrings.guestModeInDevelopment),
-        backgroundColor: AppColors.primaryRed,
-      ),
-    );
+    Navigator.pushReplacementNamed(context, '/home');
   }
 
   @override

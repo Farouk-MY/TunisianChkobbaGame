@@ -96,11 +96,10 @@ class PlayCardUseCase {
     if (winnerId != null) {
       // Game over!
       updatedState = updatedState.endGame(winnerId);
-    } else {
-      // Start new round
-      updatedState = updatedState.startNewRound();
-      updatedState = updatedState.dealInitialCards();
     }
+    // Otherwise, stay in roundEnd phase.
+    // The UI will show the score board, then call GameProvider.startNextRound()
+    // which handles startNewRound() + dealInitialCards().
 
     return updatedState;
   }

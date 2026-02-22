@@ -6,8 +6,9 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/game_constants.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/services/audio_service.dart';
+import '../../../../core/services/game_history_service.dart';
 
-/// Settings page for game preferences
+/// Settings page — audio, visuals, and game preferences.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -19,8 +20,10 @@ class _SettingsPageState extends State<SettingsPage> {
   final AudioService _audioService = AudioService();
   bool _soundEnabled = true;
   bool _musicEnabled = true;
-  bool _timerEnabled = true;
   bool _vibrationEnabled = true;
+  double _musicVolume = 0.55;
+  double _sfxVolume = 0.80;
+  bool _timerEnabled = true;
   int _timerDuration = 60;
   String _defaultDifficulty = GameConstants.aiMedium;
 
@@ -36,6 +39,8 @@ class _SettingsPageState extends State<SettingsPage> {
       _soundEnabled = _audioService.isSoundEnabled;
       _musicEnabled = _audioService.isMusicEnabled;
       _vibrationEnabled = _audioService.isVibrationEnabled;
+      _musicVolume = _audioService.musicVolume;
+      _sfxVolume = _audioService.sfxVolume;
     });
   }
 
@@ -43,12 +48,13 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     return Consumer<ThemeProvider>(
       builder: (context, themeProvider, child) {
+        final isRed = themeProvider.isRedTheme;
+        final accent = isRed ? AppColors.gold : AppColors.primaryRed;
+
         return Scaffold(
           body: Container(
             decoration: BoxDecoration(
-              gradient: themeProvider.isRedTheme
-                  ? AppColors.primaryGradient
-                  : AppColors.whiteGradient,
+              gradient: isRed ? AppColors.primaryGradient : AppColors.whiteGradient,
             ),
             child: SafeArea(
               child: Column(
@@ -60,33 +66,24 @@ class _SettingsPageState extends State<SettingsPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // ── Appearance ──
                           _buildSection(
                             'Apparence',
                             Icons.palette,
-                            [
-                              _buildThemeToggle(themeProvider),
-                            ],
+                            [_buildThemeToggle(themeProvider)],
                             themeProvider,
                           ),
+
                           const SizedBox(height: 24),
+
+                          // ── Audio ──
                           _buildSection(
                             'Audio',
                             Icons.volume_up,
                             [
                               _buildSwitchTile(
-                                'Effets sonores',
-                                'Sons des cartes et actions',
-                                Icons.music_note,
-                                _soundEnabled,
-                                (val) {
-                                  setState(() => _soundEnabled = val);
-                                  _audioService.setSoundEnabled(val);
-                                },
-                                themeProvider,
-                              ),
-                              _buildSwitchTile(
                                 'Musique de fond',
-                                'Ambiance musicale pendant le jeu',
+                                'Ambiance musicale',
                                 Icons.library_music,
                                 _musicEnabled,
                                 (val) {
@@ -95,6 +92,41 @@ class _SettingsPageState extends State<SettingsPage> {
                                 },
                                 themeProvider,
                               ),
+                              if (_musicEnabled)
+                                _buildVolumeSlider(
+                                  'Volume musique',
+                                  Icons.music_note,
+                                  _musicVolume,
+                                  (val) {
+                                    setState(() => _musicVolume = val);
+                                    _audioService.setMusicVolume(val);
+                                  },
+                                  themeProvider,
+                                  accent,
+                                ),
+                              _buildSwitchTile(
+                                'Effets sonores',
+                                'Sons des cartes et actions',
+                                Icons.surround_sound,
+                                _soundEnabled,
+                                (val) {
+                                  setState(() => _soundEnabled = val);
+                                  _audioService.setSoundEnabled(val);
+                                },
+                                themeProvider,
+                              ),
+                              if (_soundEnabled)
+                                _buildVolumeSlider(
+                                  'Volume effets',
+                                  Icons.graphic_eq,
+                                  _sfxVolume,
+                                  (val) {
+                                    setState(() => _sfxVolume = val);
+                                    _audioService.setSfxVolume(val);
+                                  },
+                                  themeProvider,
+                                  accent,
+                                ),
                               _buildSwitchTile(
                                 'Vibrations',
                                 'Retour haptique sur les actions',
@@ -109,7 +141,10 @@ class _SettingsPageState extends State<SettingsPage> {
                             ],
                             themeProvider,
                           ),
+
                           const SizedBox(height: 24),
+
+                          // ── Game ──
                           _buildSection(
                             'Jeu',
                             Icons.games,
@@ -128,23 +163,28 @@ class _SettingsPageState extends State<SettingsPage> {
                             ],
                             themeProvider,
                           ),
+
                           const SizedBox(height: 24),
+
+                          // ── Data ──
+                          _buildSection(
+                            'Données',
+                            Icons.storage,
+                            [
+                              _buildResetStatsButton(themeProvider),
+                            ],
+                            themeProvider,
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          // ── About ──
                           _buildSection(
                             'À propos',
                             Icons.info_outline,
                             [
-                              _buildInfoTile(
-                                'Version',
-                                '1.0.0',
-                                Icons.code,
-                                themeProvider,
-                              ),
-                              _buildInfoTile(
-                                'Développeur',
-                                'Chkobba Team',
-                                Icons.person,
-                                themeProvider,
-                              ),
+                              _buildInfoTile('Version', '1.0.0', Icons.code, themeProvider),
+                              _buildInfoTile('Développeur', 'Chkobba Team', Icons.person, themeProvider),
                             ],
                             themeProvider,
                           ),
@@ -161,6 +201,10 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  HEADER
+  // └─────────────────────────────────────────────────────────────────┘
+
   Widget _buildHeader(ThemeProvider themeProvider) {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -168,10 +212,7 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: Icon(
-              Icons.arrow_back_ios,
-              color: themeProvider.textColor,
-            ),
+            icon: Icon(Icons.arrow_back_ios, color: themeProvider.textColor),
           ),
           const SizedBox(width: 8),
           Text(
@@ -186,6 +227,10 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  SECTION
+  // └─────────────────────────────────────────────────────────────────┘
 
   Widget _buildSection(
     String title,
@@ -236,13 +281,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
           ),
-          child: Column(
-            children: children,
-          ),
+          child: Column(children: children),
         ),
       ],
     );
   }
+
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  THEME TOGGLE
+  // └─────────────────────────────────────────────────────────────────┘
 
   Widget _buildThemeToggle(ThemeProvider themeProvider) {
     return Padding(
@@ -316,9 +363,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Icon(
                   themeProvider.isRedTheme ? Icons.dark_mode : Icons.light_mode,
                   size: 16,
-                  color: themeProvider.isRedTheme
-                      ? AppColors.primaryRed
-                      : AppColors.gold,
+                  color: themeProvider.isRedTheme ? AppColors.primaryRed : AppColors.gold,
                 ),
               ),
             ),
@@ -327,6 +372,10 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  SWITCH TILE
+  // └─────────────────────────────────────────────────────────────────┘
 
   Widget _buildSwitchTile(
     String title,
@@ -379,6 +428,72 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  VOLUME SLIDER
+  // └─────────────────────────────────────────────────────────────────┘
+
+  Widget _buildVolumeSlider(
+    String label,
+    IconData icon,
+    double value,
+    ValueChanged<double> onChanged,
+    ThemeProvider themeProvider,
+    Color accent,
+  ) {
+    final isRed = themeProvider.isRedTheme;
+    final percent = (value * 100).round();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: isRed ? Colors.white38 : AppColors.grey500,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 4,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                activeTrackColor: accent,
+                inactiveTrackColor: isRed ? Colors.white12 : AppColors.grey200,
+                thumbColor: accent,
+                overlayColor: accent.withAlpha(40),
+              ),
+              child: Slider(
+                value: value,
+                min: 0.0,
+                max: 1.0,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 38,
+            child: Text(
+              '$percent%',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isRed ? Colors.white54 : AppColors.grey600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  TIMER SLIDER
+  // └─────────────────────────────────────────────────────────────────┘
+
   Widget _buildTimerSlider(ThemeProvider themeProvider) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -418,22 +533,31 @@ class _SettingsPageState extends State<SettingsPage> {
             max: 120,
             divisions: 6,
             activeColor: AppColors.gold,
-            inactiveColor: themeProvider.isRedTheme
-                ? Colors.white24
-                : AppColors.grey200,
+            inactiveColor:
+                themeProvider.isRedTheme ? Colors.white24 : AppColors.grey200,
             onChanged: (val) => setState(() => _timerDuration = val.round()),
           ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('30s', style: TextStyle(fontSize: 11, color: themeProvider.secondaryTextColor)),
-              Text('120s', style: TextStyle(fontSize: 11, color: themeProvider.secondaryTextColor)),
+              Text('30s',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: themeProvider.secondaryTextColor)),
+              Text('120s',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: themeProvider.secondaryTextColor)),
             ],
           ),
         ],
       ),
     );
   }
+
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  DIFFICULTY SELECTOR
+  // └─────────────────────────────────────────────────────────────────┘
 
   Widget _buildDifficultySelector(ThemeProvider themeProvider) {
     final difficulties = [
@@ -472,10 +596,14 @@ class _SettingsPageState extends State<SettingsPage> {
             children: difficulties.map((diff) {
               final isSelected = _defaultDifficulty == diff.$1;
               return GestureDetector(
-                onTap: () => setState(() => _defaultDifficulty = diff.$1),
+                onTap: () {
+                  _audioService.playButtonTap();
+                  setState(() => _defaultDifficulty = diff.$1);
+                },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? AppColors.gold
@@ -494,7 +622,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(diff.$3, style: const TextStyle(fontSize: 14)),
+                      Text(diff.$3,
+                          style: const TextStyle(fontSize: 14)),
                       const SizedBox(width: 6),
                       Text(
                         diff.$2,
@@ -516,6 +645,10 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+
+  // ┌─────────────────────────────────────────────────────────────────┐
+  //  INFO TILE
+  // └─────────────────────────────────────────────────────────────────┘
 
   Widget _buildInfoTile(
     String title,
@@ -545,6 +678,106 @@ class _SettingsPageState extends State<SettingsPage> {
             style: TextStyle(
               fontSize: 14,
               color: themeProvider.secondaryTextColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResetStatsButton(ThemeProvider themeProvider) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: InkWell(
+        onTap: () => _confirmResetStats(themeProvider),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.red.withAlpha(20),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.red.withAlpha(40)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Réinitialiser les statistiques',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: themeProvider.textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Supprimer l\'historique et remettre les stats à zéro',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: themeProvider.secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.redAccent, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmResetStats(ThemeProvider themeProvider) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: themeProvider.isRedTheme
+            ? const Color(0xFF1A0A12)
+            : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Réinitialiser ?',
+          style: TextStyle(color: themeProvider.textColor),
+        ),
+        content: Text(
+          'Toutes vos statistiques et votre historique de parties seront supprimés. Cette action est irréversible.',
+          style: TextStyle(color: themeProvider.secondaryTextColor, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Annuler',
+              style: TextStyle(color: themeProvider.secondaryTextColor),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              await GameHistoryService.clearHistory();
+              await GameHistoryService.resetStats();
+              if (!mounted) return;
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('Statistiques réinitialisées'),
+                  backgroundColor: themeProvider.isRedTheme
+                      ? AppColors.primaryRed
+                      : AppColors.grey900,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              );
+            },
+            child: const Text(
+              'Supprimer',
+              style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
             ),
           ),
         ],

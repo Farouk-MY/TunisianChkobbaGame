@@ -2,14 +2,16 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math' as math;
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/services/audio_service.dart';
-import '../../../game/presentation/providers/game_provider.dart';
+import '../../../../core/services/game_history_service.dart';
 import '../../../game/presentation/pages/game_board_page.dart';
 import '../../../game/presentation/widgets/game_setup_dialog.dart';
+
 
 class ChkobaHomePage extends StatefulWidget {
   const ChkobaHomePage({super.key});
@@ -27,11 +29,47 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
 
   late Animation<double> _fadeAnimation;
 
+  // Player stats
+  String _playerName = 'Joueur';
+  int _gamesPlayed = 0;
+  int _gamesWon = 0;
+  int _highestScore = 0;
+  int _totalChkobbas = 0;
+
   @override
   void initState() {
     super.initState();
     _initAnimations();
     _initAudio();
+    _loadPlayerData();
+  }
+
+  Future<void> _loadPlayerData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stats = await GameHistoryService.getPlayerStats();
+    if (!mounted) return;
+    setState(() {
+      _playerName = prefs.getString('player_name') ?? 'Joueur';
+      _gamesPlayed = stats.gamesPlayed;
+      _gamesWon = stats.gamesWon;
+      _highestScore = stats.highestScore;
+      _totalChkobbas = stats.totalChkobbas;
+    });
+  }
+
+  int get _playerLevel {
+    if (_gamesPlayed == 0) return 1;
+    return (_gamesPlayed ~/ 5) + 1;
+  }
+
+  String get _playerInitials {
+    final parts = _playerName.trim().split(' ');
+    if (parts.length >= 2) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
+    return _playerName.length >= 2
+        ? _playerName.substring(0, 2).toUpperCase()
+        : _playerName.toUpperCase();
   }
 
   void _initAudio() async {
@@ -117,7 +155,10 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
           },
           transitionDuration: const Duration(milliseconds: 400),
         ),
-      );
+      ).then((_) {
+        // Refresh stats when returning from game
+        if (mounted) _loadPlayerData();
+      });
     }
   }
 
@@ -394,6 +435,7 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
                       Icons.people,
                           () => _showFeatureSnackBar('Multijoueur'),
                       themeProvider,
+                      isComingSoon: true,
                     ),
                     _buildGameModeCard(
                       'Tournoi',
@@ -401,13 +443,22 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
                       Icons.emoji_events,
                           () => _showFeatureSnackBar('Tournoi'),
                       themeProvider,
+                      isComingSoon: true,
                     ),
                     _buildGameModeCard(
                       'Tutoriel',
                       'Apprendre',
                       Icons.school,
-                          () => _showFeatureSnackBar('Tutoriel'),
+                          () => Navigator.pushNamed(context, '/tutorial'),
                       themeProvider,
+                    ),
+                    _buildGameModeCard(
+                      '2 vs 2',
+                      'Équipe',
+                      Icons.group,
+                          () => _showFeatureSnackBar('Mode Équipe'),
+                      themeProvider,
+                      isComingSoon: true,
                     ),
                   ],
                 );
@@ -426,6 +477,7 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
       VoidCallback onTap,
       ThemeProvider themeProvider, {
         bool isPrimary = false,
+        bool isComingSoon = false,
       }) {
     return AnimatedBuilder(
       animation: isPrimary ? _pulseController : _fadeController,
@@ -458,42 +510,70 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
                         : themeProvider.borderColor,
                   ),
                 ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
+                child: Stack(
                   children: [
-                    Icon(
-                      icon,
-                      size: 18,
-                      color: isPrimary
-                          ? AppColors.darkRed
-                          : themeProvider.accentColor,
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: isPrimary
-                            ? AppColors.darkRed
-                            : themeProvider.textColor,
+                    Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            icon,
+                            size: 18,
+                            color: isPrimary
+                                ? AppColors.darkRed
+                                : isComingSoon
+                                    ? themeProvider.secondaryTextColor
+                                    : themeProvider.accentColor,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isPrimary
+                                  ? AppColors.darkRed
+                                  : themeProvider.textColor,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: isPrimary
+                                  ? AppColors.darkRed.withOpacity(0.8)
+                                  : themeProvider.secondaryTextColor,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: isPrimary
-                            ? AppColors.darkRed.withOpacity(0.8)
-                            : themeProvider.secondaryTextColor,
+                    if (isComingSoon)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppColors.gold,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Bientôt',
+                            style: TextStyle(
+                              fontSize: 7,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.darkRed,
+                            ),
+                          ),
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
                   ],
                 ),
               ),
@@ -547,7 +627,7 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
               radius: 25,
               backgroundColor: AppColors.gold,
               child: Text(
-                'JD',
+                _playerInitials,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -561,7 +641,7 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
 
           Center(
             child: Text(
-              'Joueur Demo',
+              _playerName,
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.bold,
@@ -580,7 +660,7 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                'Niveau 1',
+                'Niveau $_playerLevel',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
@@ -592,11 +672,13 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
 
           const SizedBox(height: 12),
 
-          _buildStatItem('Parties', '0', Icons.games, themeProvider),
+          _buildStatItem('Parties', '$_gamesPlayed', Icons.games, themeProvider),
           const SizedBox(height: 4),
-          _buildStatItem('Victoires', '0', Icons.star, themeProvider),
+          _buildStatItem('Victoires', '$_gamesWon', Icons.star, themeProvider),
           const SizedBox(height: 4),
-          _buildStatItem('Score', '0', Icons.emoji_events, themeProvider),
+          _buildStatItem('Meilleur', '$_highestScore', Icons.emoji_events, themeProvider),
+          const SizedBox(height: 4),
+          _buildStatItem('Chkobbas', '$_totalChkobbas', Icons.auto_awesome, themeProvider),
           ],
         ),
       ),
@@ -645,10 +727,10 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _buildQuickActionButton(
-            Icons.leaderboard,
-            'Classement',
+            Icons.history,
+            'Historique',
             themeProvider,
-                () => _showFeatureSnackBar('Classement'),
+                () => Navigator.pushNamed(context, '/history'),
           ),
           _buildQuickActionButton(
             Icons.settings,
