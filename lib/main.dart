@@ -1,9 +1,10 @@
-// lib/main.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/theme/theme_provider.dart';
+import 'core/services/supabase_service.dart';
+import 'core/services/auth_service.dart';
+import 'core/services/profile_service.dart';
 import 'features/splash/presentation/pages/splash_page.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/home/presentation/pages/home_page.dart';
@@ -16,6 +17,11 @@ import 'features/game/domain/usecases/initialize_game_usecase.dart';
 import 'features/game/domain/usecases/play_card_usecase.dart';
 import 'features/game/domain/usecases/validate_capture_usecase.dart';
 import 'features/game/domain/usecases/calculate_score_usecase.dart';
+import 'features/multiplayer/presentation/pages/lobby_page.dart';
+import 'features/multiplayer/presentation/pages/online_game_page.dart';
+import 'features/multiplayer/presentation/providers/online_game_provider.dart';
+import 'features/profile/presentation/pages/profile_page.dart';
+import 'features/leaderboard/presentation/pages/leaderboard_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +31,9 @@ void main() async {
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
+
+  // Initialize Supabase
+  await SupabaseService.initialize();
 
   runApp(const ChkobaApp());
 }
@@ -41,6 +50,26 @@ class ChkobaApp extends StatelessWidget {
           create: (_) => ThemeProvider(),
         ),
 
+        // Auth Provider
+        ChangeNotifierProvider(
+          create: (_) => AuthService(),
+        ),
+
+        // Profile Provider (caching layer over Supabase)
+        ChangeNotifierProxyProvider<AuthService, ProfileService>(
+          create: (_) => ProfileService(),
+          update: (_, auth, profile) {
+            final p = profile ?? ProfileService();
+            // Load profile whenever the user changes
+            if (auth.userId != null && !p.loaded) {
+              p.load(auth.userId!);
+            } else if (auth.userId == null && p.loaded) {
+              p.clear();
+            }
+            return p;
+          },
+        ),
+
         // Game Provider
         ChangeNotifierProvider(
           create: (_) {
@@ -54,6 +83,22 @@ class ChkobaApp extends StatelessWidget {
                 calculateScoreUseCase: calculateScoreUseCase,
               ),
               validateCaptureUseCase: validateCaptureUseCase,
+            );
+          },
+        ),
+
+        // Online Game Provider
+        ChangeNotifierProvider(
+          create: (_) {
+            final validateCapture = ValidateCaptureUseCase();
+            final calculateScore = CalculateScoreUseCase();
+            return OnlineGameProvider(
+              initializeGameUseCase: InitializeGameUseCase(),
+              playCardUseCase: PlayCardUseCase(
+                validateCaptureUseCase: validateCapture,
+                calculateScoreUseCase: calculateScore,
+              ),
+              validateCaptureUseCase: validateCapture,
             );
           },
         ),
@@ -73,6 +118,10 @@ class ChkobaApp extends StatelessWidget {
               '/settings': (context) => const SettingsPage(),
               '/rules': (context) => const RulesPage(),
               '/tutorial': (context) => const TutorialPage(),
+              '/lobby': (context) => const LobbyPage(),
+              '/online-game': (context) => const OnlineGamePage(),
+              '/profile': (context) => const ProfilePage(),
+              '/leaderboard': (context) => const LeaderboardPage(),
             },
           );
         },
@@ -80,3 +129,4 @@ class ChkobaApp extends StatelessWidget {
     );
   }
 }
+

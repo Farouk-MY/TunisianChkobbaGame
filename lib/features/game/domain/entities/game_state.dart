@@ -425,6 +425,69 @@ class GameState extends Equatable {
     );
   }
 
+  // ==================== SERIALIZATION ====================
+
+  /// Convert to map for Realtime broadcast.
+  /// [forPlayer] — if provided, only include that player's hand (hide opponent's).
+  Map<String, dynamic> toMap({String? forPlayer}) {
+    return {
+      'gameId': gameId,
+      'phase': phase.toString().split('.').last,
+      'players': players.map((p) {
+        final map = p.toMap();
+        // Hide opponent's hand in online mode
+        if (forPlayer != null && p.id != forPlayer) {
+          map['hand'] = List.generate(
+            p.hand.length,
+            (_) => {'rank': 0, 'suit': 'hidden', 'id': 'hidden'},
+          );
+        }
+        return map;
+      }).toList(),
+      'currentPlayerIndex': currentPlayerIndex,
+      'tableCards': tableCards.map((c) => c.toMap()).toList(),
+      'deck': deck.map((c) => c.toMap()).toList(),
+      'captureHistory': captureHistory.map((c) => c.toMap()).toList(),
+      'lastCapturerPlayerId': lastCapturerPlayerId,
+      'targetScore': targetScore,
+      'roundNumber': roundNumber,
+      'isFinalMove': isFinalMove,
+      'winnerPlayerId': winnerPlayerId,
+      'startTime': startTime.toIso8601String(),
+      'lastActionTime': lastActionTime.toIso8601String(),
+    };
+  }
+
+  /// Create from a map (received via Realtime broadcast).
+  factory GameState.fromMap(Map<String, dynamic> map) {
+    return GameState(
+      gameId: map['gameId'] as String,
+      phase: GamePhase.values.firstWhere(
+        (e) => e.toString().split('.').last == map['phase'],
+      ),
+      players: (map['players'] as List<dynamic>)
+          .map((p) => Player.fromMap(p as Map<String, dynamic>))
+          .toList(),
+      currentPlayerIndex: map['currentPlayerIndex'] as int,
+      tableCards: (map['tableCards'] as List<dynamic>)
+          .map((c) => Card.fromMap(c as Map<String, dynamic>))
+          .toList(),
+      deck: (map['deck'] as List<dynamic>)
+          .map((c) => Card.fromMap(c as Map<String, dynamic>))
+          .toList(),
+      captureHistory: (map['captureHistory'] as List<dynamic>)
+          .map((c) => Capture.fromMap(c as Map<String, dynamic>))
+          .toList(),
+      lastCapturerPlayerId: map['lastCapturerPlayerId'] as String?,
+      targetScore: map['targetScore'] as int? ?? 21,
+      roundNumber: map['roundNumber'] as int? ?? 1,
+      isFinalMove: map['isFinalMove'] as bool? ?? false,
+      winnerPlayerId: map['winnerPlayerId'] as String?,
+      startTime: DateTime.parse(map['startTime'] as String),
+      lastActionTime: DateTime.parse(map['lastActionTime'] as String),
+    );
+  }
+
   // ==================== EQUATABLE IMPLEMENTATION ====================
 
   @override

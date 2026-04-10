@@ -7,6 +7,8 @@ import '../../../../core/constants/game_constants.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/services/audio_service.dart';
 import '../../../../core/services/game_history_service.dart';
+import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/profile_service.dart';
 
 /// Settings page — audio, visuals, and game preferences.
 class SettingsPage extends StatefulWidget {
@@ -73,6 +75,11 @@ class _SettingsPageState extends State<SettingsPage> {
                             [_buildThemeToggle(themeProvider)],
                             themeProvider,
                           ),
+
+                          const SizedBox(height: 24),
+
+                          // ── Compte (shown only when authenticated) ──
+                          _buildAccountSection(themeProvider),
 
                           const SizedBox(height: 24),
 
@@ -759,13 +766,13 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           TextButton(
             onPressed: () async {
+              Navigator.pop(ctx);
               await GameHistoryService.clearHistory();
               await GameHistoryService.resetStats();
               if (!mounted) return;
-              Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: const Text('Statistiques réinitialisées'),
+                  content: const Text('Statistiques reinitialisees'),
                   backgroundColor: themeProvider.isRedTheme
                       ? AppColors.primaryRed
                       : AppColors.grey900,
@@ -783,5 +790,170 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  // Account section
+  Widget _buildAccountSection(ThemeProvider themeProvider) {
+    final auth = context.watch<AuthService>();
+    if (!auth.isAuthenticated) return const SizedBox.shrink();
+
+    final profile = context.watch<ProfileService>();
+    final isRed = themeProvider.isRedTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.account_circle_outlined,
+              size: 20,
+              color: isRed ? AppColors.gold : AppColors.primaryRed,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Compte',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: themeProvider.textColor,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            color: isRed ? AppColors.whiteOpacity(0.08) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isRed ? AppColors.whiteOpacity(0.1) : AppColors.grey200,
+            ),
+          ),
+          child: Column(
+            children: [
+              ListTile(
+                leading: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: AppColors.gold,
+                  backgroundImage: profile.avatarUrl != null
+                      ? NetworkImage(profile.avatarUrl!)
+                      : null,
+                  child: profile.avatarUrl == null
+                      ? Text(
+                          profile.initials,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.darkRed,
+                          ),
+                        )
+                      : null,
+                ),
+                title: Text(
+                  profile.displayName,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.textColor,
+                  ),
+                ),
+                subtitle: Text(
+                  auth.email.isNotEmpty ? auth.email : 'Compte anonyme',
+                  style: TextStyle(
+                    color: themeProvider.secondaryTextColor,
+                    fontSize: 12,
+                  ),
+                ),
+                trailing: Icon(Icons.chevron_right, color: themeProvider.secondaryTextColor),
+                onTap: () => Navigator.pushNamed(context, '/profile'),
+              ),
+              Divider(
+                height: 1,
+                color: isRed ? AppColors.whiteOpacity(0.1) : AppColors.grey200,
+                indent: 16,
+                endIndent: 16,
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _confirmLogout(themeProvider),
+                    icon: const Icon(Icons.logout_rounded,
+                        color: Colors.white, size: 20),
+                    label: const Text(
+                      'Se déconnecter',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryRed,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      elevation: 3,
+                      shadowColor:
+                          AppColors.primaryRed.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _confirmLogout(ThemeProvider themeProvider) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: themeProvider.isRedTheme ? AppColors.darkRed : AppColors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Deconnexion',
+            style: TextStyle(
+                color: themeProvider.textColor, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Voulez-vous vraiment vous deconnecter ?',
+          style: TextStyle(color: themeProvider.secondaryTextColor),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryRed,
+              foregroundColor: AppColors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Deconnecter'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final profileService = context.read<ProfileService>();
+    final authService = context.read<AuthService>();
+
+    try {
+      await profileService.clear();
+      await authService.signOut();
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: ${e.toString().split(']').last.trim()}')),
+        );
+      }
+    }
   }
 }

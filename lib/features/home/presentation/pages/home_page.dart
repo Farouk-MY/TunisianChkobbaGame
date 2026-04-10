@@ -2,13 +2,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math' as math;
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/services/audio_service.dart';
 import '../../../../core/services/game_history_service.dart';
+import '../../../../core/services/profile_service.dart';
 import '../../../game/presentation/pages/game_board_page.dart';
 import '../../../game/presentation/widgets/game_setup_dialog.dart';
 
@@ -29,48 +29,26 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
 
   late Animation<double> _fadeAnimation;
 
-  // Player stats
-  String _playerName = 'Joueur';
-  int _gamesPlayed = 0;
-  int _gamesWon = 0;
+  // Local game history (highest score from local storage)
   int _highestScore = 0;
-  int _totalChkobbas = 0;
 
   @override
   void initState() {
     super.initState();
     _initAnimations();
     _initAudio();
-    _loadPlayerData();
+    _loadHighScore();
   }
 
-  Future<void> _loadPlayerData() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _loadHighScore() async {
     final stats = await GameHistoryService.getPlayerStats();
     if (!mounted) return;
     setState(() {
-      _playerName = prefs.getString('player_name') ?? 'Joueur';
-      _gamesPlayed = stats.gamesPlayed;
-      _gamesWon = stats.gamesWon;
       _highestScore = stats.highestScore;
-      _totalChkobbas = stats.totalChkobbas;
     });
   }
 
-  int get _playerLevel {
-    if (_gamesPlayed == 0) return 1;
-    return (_gamesPlayed ~/ 5) + 1;
-  }
 
-  String get _playerInitials {
-    final parts = _playerName.trim().split(' ');
-    if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return _playerName.length >= 2
-        ? _playerName.substring(0, 2).toUpperCase()
-        : _playerName.toUpperCase();
-  }
 
   void _initAudio() async {
     await _audioService.initialize();
@@ -156,8 +134,8 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
           transitionDuration: const Duration(milliseconds: 400),
         ),
       ).then((_) {
-        // Refresh stats when returning from game
-        if (mounted) _loadPlayerData();
+        // Refresh high score when returning from game
+        if (mounted) _loadHighScore();
       });
     }
   }
@@ -433,9 +411,8 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
                       'Multijoueur',
                       'En ligne',
                       Icons.people,
-                          () => _showFeatureSnackBar('Multijoueur'),
+                          () => Navigator.pushNamed(context, '/lobby'),
                       themeProvider,
-                      isComingSoon: true,
                     ),
                     _buildGameModeCard(
                       'Tournoi',
@@ -585,103 +562,114 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
   }
 
   Widget _buildStatsSection(ThemeProvider themeProvider) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: themeProvider.isRedTheme
-              ? [AppColors.whiteOpacity(0.1), AppColors.whiteOpacity(0.05)]
-              : [AppColors.white, AppColors.grey50],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: themeProvider.borderColor),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-          Row(
-            children: [
-              Icon(
-                Icons.person,
-                color: AppColors.orangeSection,
-                size: 16,
+    return Consumer<ProfileService>(
+      builder: (context, profile, _) {
+        return GestureDetector(
+          onTap: () => Navigator.pushNamed(context, '/profile'),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: themeProvider.isRedTheme
+                    ? [AppColors.whiteOpacity(0.1), AppColors.whiteOpacity(0.05)]
+                    : [AppColors.white, AppColors.grey50],
               ),
-              const SizedBox(width: 6),
-              Text(
-                'Mon Profil',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: themeProvider.textColor,
-                ),
-              ),
-            ],
-          ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: themeProvider.borderColor),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.person, color: AppColors.orangeSection, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Mon Profil',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: themeProvider.textColor,
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(Icons.chevron_right,
+                          color: themeProvider.secondaryTextColor, size: 16),
+                    ],
+                  ),
 
-          const SizedBox(height: 12),
+                  const SizedBox(height: 12),
 
-          Center(
-            child: CircleAvatar(
-              radius: 25,
-              backgroundColor: AppColors.gold,
-              child: Text(
-                _playerInitials,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.darkRed,
-                ),
+                  Center(
+                    child: CircleAvatar(
+                      radius: 25,
+                      backgroundColor: AppColors.gold,
+                      backgroundImage: profile.avatarUrl != null
+                          ? NetworkImage(profile.avatarUrl!)
+                          : null,
+                      child: profile.avatarUrl == null
+                          ? Text(
+                              profile.initials,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.darkRed,
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Center(
+                    child: Text(
+                      profile.displayName,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: themeProvider.textColor,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.gold,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '⚡ ${profile.eloRating} ELO · Niv. ${profile.level}',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.darkRed,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  _buildStatItem('Parties', '${profile.gamesPlayed}', Icons.games, themeProvider),
+                  const SizedBox(height: 4),
+                  _buildStatItem('Victoires', '${profile.gamesWon}', Icons.star, themeProvider),
+                  const SizedBox(height: 4),
+                  _buildStatItem('Meilleur', '$_highestScore', Icons.emoji_events, themeProvider),
+                  const SizedBox(height: 4),
+                  _buildStatItem('Chkobbas', '${profile.totalChkobbas}', Icons.auto_awesome, themeProvider),
+                ],
               ),
             ),
           ),
-
-          const SizedBox(height: 8),
-
-          Center(
-            child: Text(
-              _playerName,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: themeProvider.textColor,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 4),
-
-          Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppColors.gold,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'Niveau $_playerLevel',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.darkRed,
-                ),
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          _buildStatItem('Parties', '$_gamesPlayed', Icons.games, themeProvider),
-          const SizedBox(height: 4),
-          _buildStatItem('Victoires', '$_gamesWon', Icons.star, themeProvider),
-          const SizedBox(height: 4),
-          _buildStatItem('Meilleur', '$_highestScore', Icons.emoji_events, themeProvider),
-          const SizedBox(height: 4),
-          _buildStatItem('Chkobbas', '$_totalChkobbas', Icons.auto_awesome, themeProvider),
-          ],
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -713,7 +701,7 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
 
   Widget _buildQuickActionsColumn(ThemeProvider themeProvider) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: themeProvider.isRedTheme
@@ -727,22 +715,28 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _buildQuickActionButton(
+            Icons.emoji_events,
+            'Classement',
+            themeProvider,
+            () => Navigator.pushNamed(context, '/leaderboard'),
+          ),
+          _buildQuickActionButton(
             Icons.history,
             'Historique',
             themeProvider,
-                () => Navigator.pushNamed(context, '/history'),
+            () => Navigator.pushNamed(context, '/history'),
           ),
           _buildQuickActionButton(
             Icons.settings,
             'Paramètres',
             themeProvider,
-                () => Navigator.pushNamed(context, '/settings'),
+            () => Navigator.pushNamed(context, '/settings'),
           ),
           _buildQuickActionButton(
             Icons.help_outline,
             'Aide',
             themeProvider,
-                () => Navigator.pushNamed(context, '/rules'),
+            () => Navigator.pushNamed(context, '/rules'),
           ),
         ],
       ),
@@ -759,20 +753,20 @@ class _ChkobaHomePageState extends State<ChkobaHomePage> with TickerProviderStat
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               icon,
               color: themeProvider.accentColor,
-              size: 28,
+              size: 22,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 10,
                 color: themeProvider.textColor,
               ),
             ),

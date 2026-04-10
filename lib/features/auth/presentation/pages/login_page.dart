@@ -7,6 +7,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/app_dimensions.dart';
 import '../../../../core/theme/theme_provider.dart';
+import '../../../../core/services/auth_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -74,21 +75,67 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  void _handleSocialLogin(String provider) {
+  Future<void> _handleSocialLogin(String provider) async {
+    debugPrint('[LoginPage] _handleSocialLogin: $provider');
+    if (_isLoading) {
+      debugPrint('[LoginPage] Already loading, ignoring click.');
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _loadingProvider = provider;
     });
 
-    Future.delayed(const Duration(seconds: 2), () {
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      
+      debugPrint('[LoginPage] Calling authService.signInWithGoogle()...');
+      await authService.signInWithGoogle();
+      
+      debugPrint('[LoginPage] Auth success, navigating home.');
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/home');
       }
-    });
+    } catch (e, stack) {
+      debugPrint('[LoginPage] Auth error: $e');
+      debugPrint(stack.toString());
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _loadingProvider = '';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur de connexion: ${e.toString().split(']').last.trim()}'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
-  void _handleGuestLogin() {
-    Navigator.pushReplacementNamed(context, '/home');
+  Future<void> _handleGuestLogin() async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+      _loadingProvider = 'guest';
+    });
+
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      await authService.signInAnonymous();
+
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
+    } catch (e) {
+      // If Supabase fails (no internet, etc.), navigate anyway for offline play
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
+    }
   }
 
   @override
@@ -340,15 +387,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildSocialButton(
-            'Facebook',
-            Icons.facebook,
-            const Color(0xFF1877F2),
-            themeProvider,
-          ),
-
-          const SizedBox(height: 16),
-
           _buildSocialButton(
             'Google',
             Icons.g_mobiledata,

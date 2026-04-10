@@ -8,6 +8,8 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/app_durations.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/services/audio_service.dart';
+import '../../../../core/services/supabase_service.dart';
+import '../../../../core/services/profile_service.dart';
 import 'dart:math' as math;
 
 class SplashPage extends StatefulWidget {
@@ -101,7 +103,20 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
   void _navigateToLogin() {
     Future.delayed(const Duration(milliseconds: 500), () async {
       if (!mounted) return;
-      // Check internet connectivity
+
+      // 1. Check if there is an active Supabase session (persisted between app launches)
+      final session = SupabaseService.auth.currentSession;
+      if (session != null) {
+        // Already signed in — load profile cache then go home
+        final profile = context.read<ProfileService>();
+        if (!profile.loaded) {
+          await profile.load(session.user.id);
+        }
+        if (mounted) Navigator.pushReplacementNamed(context, '/home');
+        return;
+      }
+
+      // 2. No session — check internet and go to login
       bool hasInternet = false;
       try {
         final result = await InternetAddress.lookup('google.com')

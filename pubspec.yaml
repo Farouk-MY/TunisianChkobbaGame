@@ -20,10 +20,13 @@ dependencies:
   shared_preferences: ^2.5.4
   audioplayers: ^6.5.1
 
-  # Firebase (for multiplayer - Phase 3)
-  # firebase_core: ^2.24.2
-  # cloud_firestore: ^4.14.0
-  # firebase_auth: ^4.16.0
+  # Supabase (Online Multiplayer)
+  supabase_flutter: ^2.8.0
+  google_sign_in: ^6.2.2
+
+  # Sharing & Deep Links
+  share_plus: ^10.1.4
+  app_links: ^6.3.3
 
 dev_dependencies:
   flutter_test:
